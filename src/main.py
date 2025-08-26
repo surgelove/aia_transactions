@@ -120,6 +120,30 @@ class TransactionStreamer:
         while True:
             try:
                 print(f"🔄 Starting/restarting OANDA transaction stream (attempt {retry_count + 1})")
+
+                # Before starting the live stream, fetch the current account state and publish it
+                try:
+                    account_state = broker.get_account_state(self.credentials)
+                    if account_state and not account_state.get('error'):
+                        state_key = f"{self.transaction_key_prefix}account_state:{self.credentials.get('account_id')}:{uuid.uuid4().hex[:8]}"
+                        # Store with TTL so it self-cleans
+                        self.redis_client.setex(state_key, self.transaction_ttl, json.dumps({'type': 'account_state', 'state': account_state}))
+                        self.redis_client.sadd(self.transaction_index_key, state_key)
+                        self.redis_client.expire(self.transaction_index_key, self.index_ttl)
+
+                        # Also publish to Redis stream for consumers that read the stream
+                        try:
+                            # Use field 'state' to hold the JSON payload
+                            self.redis_client.xadd('transaction_stream', {'state': json.dumps(account_state)})
+                        except Exception:
+                            # If Redis doesn't support streams or fails, ignore stream publish
+                            pass
+
+                        print("📥 Published initial account state to Redis")
+                    else:
+                        print(f"⚠️ Could not fetch account state: {account_state.get('error') if account_state else 'unknown'}")
+                except Exception as e:
+                    print(f"⚠️ Error fetching/publishing account state: {e}")
                 
                 for transaction in broker.stream_oanda_transactions(self.credentials):
                     transaction_id = transaction.get('id')

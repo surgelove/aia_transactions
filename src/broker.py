@@ -465,6 +465,52 @@ def get_instrument_precision(credentials, instrument_name):
     except requests.exceptions.RequestException as e:
         print(f"An error occurred: {e}")
         return None
+
+def get_account_state(credentials):
+    """
+    Fetch basic account state from OANDA: open positions, pending orders, and account summary.
+
+    Returns:
+        dict: { 'positions': [...], 'orders': [...], 'summary': {...} } or {'error': ...}
+    """
+    api_key = credentials.get('api_key')
+    account_id = credentials.get('account_id')
+    base_url = credentials.get('url', 'https://api-fxtrade.oanda.com')
+
+    if not api_key or not account_id:
+        return {'error': 'Missing api_key or account_id in credentials'}
+
+    headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
+
+    try:
+        # Open positions
+        pos_url = f"{base_url}/v3/accounts/{account_id}/openPositions"
+        pos_resp = requests.get(pos_url, headers=headers, timeout=10)
+        pos_resp.raise_for_status()
+        positions = pos_resp.json().get('positions', [])
+
+        # Pending orders
+        orders_url = f"{base_url}/v3/accounts/{account_id}/pendingOrders"
+        orders_resp = requests.get(orders_url, headers=headers, timeout=10)
+        orders_resp.raise_for_status()
+        orders = orders_resp.json().get('orders', [])
+
+        # Account summary (NAV, balance, etc.)
+        summary_url = f"{base_url}/v3/accounts/{account_id}/summary"
+        summary_resp = requests.get(summary_url, headers=headers, timeout=10)
+        summary_resp.raise_for_status()
+        summary = summary_resp.json().get('account', {})
+
+        return {
+            'positions': positions,
+            'orders': orders,
+            'summary': summary
+        }
+
+    except requests.exceptions.RequestException as e:
+        return {'error': f'API request failed: {str(e)}'}
+    except Exception as e:
+        return {'error': f'Unexpected error: {str(e)}'}
     
 def cancel_oanda_orders(credentials, instrument, side=0):
     """
